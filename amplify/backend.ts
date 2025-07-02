@@ -51,9 +51,10 @@ const chatRestApi = new RestApi(apiStack, "ChatRestApi", {
   },
   defaultCorsPreflightOptions: {
     allowOrigins: [
-      'http://localhost:3000', 
-      'https://localhost:3000',
-      'https://main.d2u0pycjfm8zuu.amplifyapp.com' // Add your deployed Amplify URL
+      // 'http://localhost:3000',
+      // 'https://localhost:3000',
+      // 'https://main.d2u0pycjfm8zuu.amplifyapp.com',
+      'https://main.d1w9nr6stbxah6.amplifyapp.com'
     ],
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowHeaders: [
