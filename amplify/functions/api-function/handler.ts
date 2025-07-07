@@ -4,6 +4,7 @@ import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { DatabaseService } from './database';
 import { getUserId, requireAuth } from './auth';
 import { generateConversationName, validateConversationName } from './naming';
+import { Logger } from './logger';
 
 interface ChatRequest {
   query: string;
@@ -49,29 +50,48 @@ const createResponse = (statusCode: number, body: any, event: APIGatewayProxyEve
 };
 
 // Just-In-Time user creation
-const ensureUserExists = async (db: DatabaseService, userId: string, authContext: any): Promise<void> => {
+const ensureUserExists = async (
+  db: DatabaseService, 
+  userId: string, 
+  authContext: any, 
+  logger: Logger
+): Promise<void> => {
   try {
     const existingUser = await db.getUser(userId);
     if (!existingUser) {
-      console.log(`Creating new user: ${userId}`);
+      logger.info(`Creating new user via JIT provisioning`, { userId });
       await db.createUser({
         userId,
         email: authContext.email,
         displayName: authContext.username || authContext.email?.split('@')[0] || 'User',
       });
-      console.log(`User created successfully: ${userId}`);
+      logger.businessEvent('user_created_jit', { 
+        userId, 
+        email: authContext.email,
+        displayName: authContext.username || authContext.email?.split('@')[0] || 'User'
+      });
     }
   } catch (error) {
     // If user creation fails due to race condition, that's okay
-    console.log(`User creation note for ${userId}:`, error);
+    logger.warn(`User creation note for ${userId}`, { error: (error as Error).message });
   }
 };
 
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
-  console.log('Handler started, event:', JSON.stringify(event, null, 2));
+  const requestId = event.requestContext?.requestId || 'unknown';
+  const startTime = Date.now();
+  const logger = Logger.createLogger({ requestId });
+  
+  logger.requestStart(event.httpMethod, event.path || '', {
+    requestId,
+    userAgent: event.headers['User-Agent'],
+    origin: event.headers.origin || event.headers.Origin
+  });
 
   // Handle preflight OPTIONS request
   if (event.httpMethod === 'OPTIONS') {
+    const duration = Date.now() - startTime;
+    logger.requestEnd(event.httpMethod, event.path || '', 200, duration);
     return createResponse(200, '', event);
   }
 
@@ -80,37 +100,69 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const authContext = requireAuth(event);
     const userId = authContext.userId;
     
-    console.log(`Authenticated user: ${userId}`);
+    const userLogger = logger.child({ userId });
+    userLogger.info('User authenticated successfully', {
+      email: authContext.email,
+      username: authContext.username
+    });
 
-    // Initialize database service
-    const db = new DatabaseService();
+    // Initialize database service with logger
+    const db = new DatabaseService(userLogger);
 
     // Ensure user exists (JIT pattern)
-    await ensureUserExists(db, userId, authContext);
+    await ensureUserExists(db, userId, authContext, userLogger);
 
     // Handle conversation rename endpoint
     if (event.httpMethod === 'PUT' && event.path && event.path.includes('/conversation/')) {
-      return await handleConversationUpdate(event, db, userId);
+      const result = await handleConversationUpdate(event, db, userId, userLogger);
+      const duration = Date.now() - startTime;
+      logger.requestEnd(event.httpMethod, event.path, result.statusCode, duration);
+      return result;
     }
 
     // Handle main chat endpoint
     if (event.httpMethod === 'POST' && event.path === '/chat') {
-      return await handleChatRequest(event, db, userId);
+      const result = await handleChatRequest(event, db, userId, userLogger);
+      const duration = Date.now() - startTime;
+      logger.requestEnd(event.httpMethod, event.path, result.statusCode, duration);
+      return result;
     }
 
+    const duration = Date.now() - startTime;
+    logger.requestEnd(event.httpMethod, event.path || '', 404, duration);
     return createResponse(404, { error: "Endpoint not found" }, event);
 
   } catch (error: any) {
-    console.error("Detailed error information:");
-    console.error("Error name:", error.name);
-    console.error("Error message:", error.message);
-    console.error("Error code:", error.$metadata?.httpStatusCode);
-    console.error("Error timestamp:", new Date().toISOString());
-    console.error("Full error:", JSON.stringify(error, null, 2));
+    const duration = Date.now() - startTime;
+    
+    logger.error("Request failed with error", error, {
+      httpMethod: event.httpMethod,
+      path: event.path,
+      errorName: error.name,
+      errorCode: error.$metadata?.httpStatusCode,
+      duration
+    });
+    
+    let statusCode = 500;
+    let errorMessage = "An error occurred while processing your request.";
+    
+    // Handle authentication errors
+    if (error.message?.includes('Authentication required') || 
+        error.message?.includes('auth') || 
+        error.message?.includes('unauthorized')) {
+      statusCode = 401;
+      errorMessage = "Authentication required";
+      logger.security('authentication_failed', {
+        path: event.path,
+        userAgent: event.headers['User-Agent']
+      });
+    }
+    
+    logger.requestEnd(event.httpMethod, event.path || '', statusCode, duration);
     
     // Return proper error response with CORS headers
-    return createResponse(500, { 
-      error: "An error occurred while processing your request.",
+    return createResponse(statusCode, { 
+      error: errorMessage,
       details: error.message || "Unknown error",
       errorType: error.name || "Unknown"
     }, event);
@@ -120,19 +172,26 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 async function handleConversationUpdate(
   event: APIGatewayProxyEvent, 
   db: DatabaseService, 
-  userId: string
+  userId: string,
+  logger: Logger
 ): Promise<APIGatewayProxyResult> {
+  const startTime = Date.now();
+  
   try {
     // Extract conversation ID from path
     const pathParts = event.path?.split('/') || [];
     const conversationId = pathParts[pathParts.length - 1];
     
+    const opLogger = logger.child({ conversationId, operation: 'updateConversation' });
+    
     if (!conversationId) {
+      opLogger.warn('Missing conversation ID in request');
       return createResponse(400, { error: "Conversation ID is required" }, event);
     }
 
     // Parse request body
     if (!event.body) {
+      opLogger.warn('Missing request body');
       return createResponse(400, { error: "Request body is required" }, event);
     }
 
@@ -140,17 +199,34 @@ async function handleConversationUpdate(
     const { name } = body;
 
     if (!name || typeof name !== 'string') {
+      opLogger.warn('Invalid name in request', { providedName: name });
       return createResponse(400, { error: "Name is required and must be a string" }, event);
     }
 
     // Validate name using existing validation function
     const validation = validateConversationName(name);
     if (!validation.isValid) {
+      opLogger.warn('Conversation name validation failed', { 
+        name, 
+        error: validation.error 
+      });
       return createResponse(400, { error: validation.error }, event);
     }
 
+    opLogger.info('Updating conversation name', { 
+      conversationId, 
+      oldName: 'unknown',
+      newName: name.trim() 
+    });
+
     // Update the conversation
     await db.updateConversation(conversationId, userId, { name: name.trim() });
+
+    const duration = Date.now() - startTime;
+    opLogger.performance('handleConversationUpdate', duration, { 
+      conversationId,
+      success: true 
+    });
 
     return createResponse(200, { 
       success: true, 
@@ -160,7 +236,12 @@ async function handleConversationUpdate(
     }, event);
 
   } catch (error: any) {
-    console.error('Error updating conversation:', error);
+    const duration = Date.now() - startTime;
+    
+    logger.error('Failed to update conversation', error, {
+      operation: 'handleConversationUpdate',
+      duration
+    });
     
     if (error.message === 'Conversation not found or access denied') {
       return createResponse(404, { error: "Conversation not found" }, event);
@@ -176,8 +257,12 @@ async function handleConversationUpdate(
 async function handleChatRequest(
   event: APIGatewayProxyEvent, 
   db: DatabaseService, 
-  userId: string
+  userId: string,
+  logger: Logger
 ): Promise<APIGatewayProxyResult> {
+  const startTime = Date.now();
+  const opLogger = logger.child({ operation: 'chatRequest' });
+  
   // Parse the incoming request
   let query = "";
   let conversationId: string | undefined;
@@ -187,13 +272,20 @@ async function handleChatRequest(
       const body: ChatRequest = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
       query = body.query || "";
       conversationId = body.conversationId;
+      
+      opLogger.info('Chat request received', {
+        queryLength: query.length,
+        hasConversationId: !!conversationId,
+        conversationId: conversationId || 'new'
+      });
     } catch (e) {
-      console.error("Error parsing request body:", e);
+      opLogger.error("Error parsing request body", e as Error);
       return createResponse(400, { error: "Invalid request body" }, event);
     }
   }
   
   if (!query) {
+    opLogger.warn('Empty query received');
     return createResponse(400, { error: "Query parameter is required" }, event);
   }
 
@@ -202,26 +294,46 @@ async function handleChatRequest(
   if (!conversationId) {
     // Create new conversation with auto-generated name
     const conversationName = generateConversationName(query);
+    opLogger.info('Creating new conversation', { 
+      generatedName: conversationName,
+      querySnippet: query.substring(0, 50) + (query.length > 50 ? '...' : '')
+    });
+    
     conversation = await db.createConversation(userId, conversationName);
     conversationId = conversation.conversationId;
-    console.log(`Created new conversation: ${conversationId} with name: "${conversationName}"`);
+    
+    opLogger.businessEvent('new_conversation_started', {
+      conversationId,
+      name: conversationName,
+      firstQuery: query.substring(0, 100)
+    });
   } else {
     // Verify user owns the conversation
     conversation = await db.getConversation(conversationId, userId);
     if (!conversation) {
+      opLogger.security('unauthorized_conversation_access_attempt', {
+        conversationId,
+        userId
+      });
       return createResponse(403, { error: "Conversation not found or access denied" }, event);
     }
-    console.log(`Continuing conversation: ${conversationId}`);
+    opLogger.info('Continuing existing conversation', { 
+      conversationId,
+      name: conversation.name 
+    });
   }
 
+  const chatLogger = opLogger.child({ conversationId });
+
   // 2. Save the user's message
+  const userMessageStart = Date.now();
   await db.createMessage({
     conversationId,
     userId,
     content: query,
     role: 'user',
   });
-  console.log("Saved user message.");
+  chatLogger.performance('saveUserMessage', Date.now() - userMessageStart);
   
   // Initialize the Bedrock Agent Runtime client with timeout configuration
   const agentClient = new BedrockAgentRuntimeClient({ 
@@ -231,8 +343,10 @@ async function handleChatRequest(
     }
   });
   
-  console.log("Using Knowledge Base ID:", process.env.KNOWLEDGE_BASE_ID);
-  console.log("Using Region:", process.env.REGION || "us-east-1");
+  chatLogger.info('Bedrock configuration', {
+    knowledgeBaseId: process.env.KNOWLEDGE_BASE_ID,
+    region: process.env.REGION || "us-east-1"
+  });
   
   // Retrieve information from the knowledge base
   const retrieveParams = {
@@ -247,19 +361,36 @@ async function handleChatRequest(
     }
   };
   
-  console.log("Retrieve params:", JSON.stringify(retrieveParams, null, 2));
-  console.log("Starting retrieval at:", new Date().toISOString());
+  chatLogger.debug('Starting knowledge base retrieval', { 
+    numberOfResults: 5,
+    queryLength: query.length 
+  });
   
+  const retrieveStart = Date.now();
   const retrieveCommand = new RetrieveCommand(retrieveParams);
   const retrieveResponse = await agentClient.send(retrieveCommand);
+  const retrieveDuration = Date.now() - retrieveStart;
   
-  console.log("Retrieval completed at:", new Date().toISOString());
-  console.log("Retrieved results:", retrieveResponse.retrievalResults?.length || 0);
+  const resultCount = retrieveResponse.retrievalResults?.length || 0;
+  chatLogger.performance('bedrockRetrieval', retrieveDuration, {
+    resultCount,
+    success: true
+  });
+  
+  chatLogger.info('Knowledge base retrieval completed', {
+    resultCount,
+    durationMs: retrieveDuration
+  });
   
   // Extract retrieved passages
   const retrievedPassages = retrieveResponse.retrievalResults?.map((result: any) => 
     result.content?.text
   ).join("\n\n") || "";
+  
+  chatLogger.debug('Retrieved content summary', {
+    passageLength: retrievedPassages.length,
+    hasContent: retrievedPassages.length > 0
+  });
   
   // Use Bedrock Runtime to generate a response using the retrieved information
   const runtimeClient = new BedrockRuntimeClient({ 
@@ -270,7 +401,7 @@ async function handleChatRequest(
   });
   
   const generateParams = {
-    modelId: "anthropic.claude-3-sonnet-20240229-v1:0", // Adjust model if needed
+    modelId: "anthropic.claude-3-sonnet-20240229-v1:0",
     contentType: "application/json",
     accept: "application/json",
     body: JSON.stringify({
@@ -288,12 +419,26 @@ ${retrievedPassages}`
     })
   };
   
-  console.log("Starting model generation at:", new Date().toISOString());
+  chatLogger.debug('Starting model generation', {
+    modelId: "anthropic.claude-3-sonnet-20240229-v1:0",
+    maxTokens: 1000
+  });
+  
+  const generateStart = Date.now();
   const generateCommand = new InvokeModelCommand(generateParams);
   const generateResponse = await runtimeClient.send(generateCommand);
   const result: ClaudeResponse = JSON.parse(new TextDecoder().decode(generateResponse.body));
+  const generateDuration = Date.now() - generateStart;
   
-  console.log("Model generation completed at:", new Date().toISOString());
+  chatLogger.performance('bedrockGeneration', generateDuration, {
+    success: true,
+    responseLength: result.content[0].text.length
+  });
+  
+  chatLogger.info('Model generation completed', {
+    durationMs: generateDuration,
+    responseLength: result.content[0].text.length
+  });
   
   const assistantResponse = result.content[0].text;
   const sources = retrieveResponse.retrievalResults?.map((result: any) => ({
@@ -304,6 +449,7 @@ ${retrievedPassages}`
   })) || [];
 
   // 3. Save the assistant's message
+  const saveAssistantStart = Date.now();
   await db.createMessage({
     conversationId,
     userId,
@@ -311,7 +457,24 @@ ${retrievedPassages}`
     role: 'assistant',
     sources: sources, // Store sources as structured data
   });
-  console.log("Saved assistant message.");
+  chatLogger.performance('saveAssistantMessage', Date.now() - saveAssistantStart);
+  
+  const totalDuration = Date.now() - startTime;
+  chatLogger.performance('completeChatRequest', totalDuration, {
+    conversationId,
+    userMessageLength: query.length,
+    assistantMessageLength: assistantResponse.length,
+    sourceCount: sources.length,
+    retrievalDuration: retrieveDuration,
+    generationDuration: generateDuration
+  });
+  
+  chatLogger.businessEvent('chat_interaction_completed', {
+    conversationId,
+    messageExchange: 'user_assistant',
+    totalDuration,
+    hasKnowledgeBase: resultCount > 0
+  });
   
   return createResponse(200, {
     answer: assistantResponse,

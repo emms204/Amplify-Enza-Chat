@@ -70,6 +70,24 @@ backend.bedrockKbFunction.resources.lambda.addToRolePolicy(
   })
 );
 
+// Add CloudWatch Logs permissions for enhanced logging
+backend.bedrockKbFunction.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    effect: Effect.ALLOW,
+    actions: [
+      'logs:CreateLogGroup',
+      'logs:CreateLogStream',
+      'logs:PutLogEvents',
+      'logs:DescribeLogStreams',
+      'logs:DescribeLogGroups'
+    ],
+    resources: [
+      `arn:aws:logs:*:*:log-group:/aws/lambda/*`,
+      `arn:aws:logs:*:*:log-group:/aws/lambda/*:*`
+    ]
+  })
+);
+
 // Pass table names and Cognito info to Lambda function
 backend.bedrockKbFunction.addEnvironment("USER_TABLE_NAME", backend.data.resources.tables["User"].tableName);
 backend.bedrockKbFunction.addEnvironment("CONVERSATION_TABLE_NAME", backend.data.resources.tables["Conversation"].tableName);
