@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Send, FileText, ExternalLink, Upload } from "lucide-react"
+import { Send, FileText, ExternalLink, Upload, MessageSquare } from "lucide-react"
 import UploadDialog from "./upload-dialog"
 import queryKnowledgeBase from "@/services/chat_service"
 
@@ -28,10 +28,22 @@ export interface Message {
 interface ChatInterfaceProps {
   messages: Message[];
   isLoading: boolean;
+  isLoadingMessages?: boolean;
   handleSubmit: (input: string) => Promise<void>;
+  error?: string | null;
+  networkError?: string | null;
+  onRetry?: () => void;
 }
 
-export function ChatInterface({ messages, isLoading, handleSubmit }: ChatInterfaceProps) {
+export function ChatInterface({ 
+  messages, 
+  isLoading, 
+  isLoadingMessages,
+  handleSubmit,
+  error,
+  networkError,
+  onRetry
+}: ChatInterfaceProps) {
   const [input, setInput] = useState("")
   const [showAddModal, setShowAddModal] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -68,7 +80,76 @@ export function ChatInterface({ messages, isLoading, handleSubmit }: ChatInterfa
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {messages.map((message) => (
+          {/* Error Banner */}
+          {(error || networkError) && (
+            <div className="bg-red-100 dark:bg-red-900/20 border border-red-300 dark:border-red-700 rounded-lg p-4 mb-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-red-800 dark:text-red-200 font-medium">
+                    {networkError ? "Connection Error" : "Error"}
+                  </p>
+                  <p className="text-red-600 dark:text-red-300 text-sm">
+                    {networkError || error}
+                  </p>
+                </div>
+                {onRetry && (
+                  <Button
+                    onClick={onRetry}
+                    variant="outline"
+                    size="sm"
+                    className="text-red-700 dark:text-red-300 border-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-900/30"
+                  >
+                    Retry
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Loading Messages */}
+          {isLoadingMessages && (
+            <div className="flex justify-center">
+              <Card className="p-4 bg-white/90 backdrop-blur-sm border-white/20">
+                <div className="flex items-center space-x-3">
+                  <div className="flex space-x-1">
+                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce"></div>
+                    <div
+                      className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce"
+                      style={{ animationDelay: "0.1s" }}
+                    ></div>
+                    <div
+                      className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce"
+                      style={{ animationDelay: "0.2s" }}
+                    ></div>
+                  </div>
+                  <span className="text-sm text-gray-600">Loading conversation...</span>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {/* Empty State for New Conversations */}
+          {messages.length === 1 && messages[0].type === "assistant" && !isLoadingMessages && (
+            <div className="flex justify-center mt-8">
+              <Card className="max-w-md p-6 bg-white/90 backdrop-blur-sm border-white/20 text-center">
+                <MessageSquare className="h-12 w-12 mx-auto mb-4 text-emerald-500" />
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+                  Ready to help!
+                </h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                  Ask me anything about your documents and I'll provide detailed answers with sources.
+                </p>
+                <div className="space-y-2 text-xs text-gray-500 dark:text-gray-500">
+                  <p>• Try: "What is the main topic of document X?"</p>
+                  <p>• Try: "Summarize the key points from..."</p>
+                  <p>• Try: "Find information about..."</p>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {/* Regular Messages */}
+          {!isLoadingMessages && messages.map((message) => (
             <div key={message.id} className={`flex ${message.type === "user" ? "justify-end" : "justify-start"}`}>
               <Card
                 className={`max-w-[80%] p-4 ${
@@ -110,7 +191,8 @@ export function ChatInterface({ messages, isLoading, handleSubmit }: ChatInterfa
             </div>
           ))}
 
-          {isLoading && (
+          {/* AI Response Loading */}
+          {isLoading && !isLoadingMessages && (
             <div className="flex justify-start">
               <Card className="max-w-[80%] p-4 bg-white/90 backdrop-blur-sm border-white/20">
                 <div className="flex items-center space-x-2">

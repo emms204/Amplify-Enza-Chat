@@ -1,4 +1,4 @@
-import { post } from 'aws-amplify/api';
+import { post, put } from 'aws-amplify/api';
 import { Amplify } from 'aws-amplify';
 import { fetchAuthSession } from 'aws-amplify/auth';
 
@@ -11,6 +11,13 @@ interface ChatResponse {
     score: number;
   }>;
   conversationId: string;
+}
+
+interface UpdateConversationResponse {
+  success: boolean;
+  message: string;
+  conversationId: string;
+  name: string;
 }
 
 async function queryKnowledgeBase(
@@ -62,4 +69,43 @@ async function queryKnowledgeBase(
   }
 }
 
+async function updateConversationName(
+  conversationId: string,
+  name: string
+): Promise<UpdateConversationResponse> {
+  try {
+    // Get the current authentication session
+    const session = await fetchAuthSession();
+    
+    if (!session.tokens) {
+      throw new Error('User not authenticated');
+    }
+
+    const restOperation = put({
+      apiName: 'chatApi',
+      path: `/chat/conversation/${conversationId}`,
+      options: {
+        body: {
+          name: name,
+        },
+        headers: {
+          'Authorization': `Bearer ${session.tokens.idToken?.toString()}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    });
+    
+    // Wait for the response
+    const { body } = await restOperation.response;
+    
+    // Get the response body as JSON
+    const responseBody = await body.json() as unknown as UpdateConversationResponse;
+    return responseBody;
+  } catch (error) {
+    console.error('Error updating conversation name:', error);
+    throw error;
+  }
+}
+
 export default queryKnowledgeBase;
+export { updateConversationName };

@@ -151,6 +151,53 @@ chatPath.addMethod("POST", lambdaIntegration, {
   ],
 });
 
+// Create the conversation resource for updates
+const conversationPath = chatPath.addResource("conversation");
+const conversationIdPath = conversationPath.addResource("{id}");
+
+// Add PUT method for conversation updates with Cognito authorization
+conversationIdPath.addMethod("PUT", lambdaIntegration, {
+  authorizer: cognitoAuthorizer,
+  methodResponses: [
+    {
+      statusCode: '200',
+      responseParameters: {
+        'method.response.header.Access-Control-Allow-Origin': true,
+        'method.response.header.Access-Control-Allow-Headers': true,
+        'method.response.header.Access-Control-Allow-Methods': true,
+        'method.response.header.Access-Control-Allow-Credentials': true,
+      },
+    },
+    {
+      statusCode: '400',
+      responseParameters: {
+        'method.response.header.Access-Control-Allow-Origin': true,
+        'method.response.header.Access-Control-Allow-Headers': true,
+        'method.response.header.Access-Control-Allow-Methods': true,
+        'method.response.header.Access-Control-Allow-Credentials': true,
+      },
+    },
+    {
+      statusCode: '404',
+      responseParameters: {
+        'method.response.header.Access-Control-Allow-Origin': true,
+        'method.response.header.Access-Control-Allow-Headers': true,
+        'method.response.header.Access-Control-Allow-Methods': true,
+        'method.response.header.Access-Control-Allow-Credentials': true,
+      },
+    },
+    {
+      statusCode: '500',
+      responseParameters: {
+        'method.response.header.Access-Control-Allow-Origin': true,
+        'method.response.header.Access-Control-Allow-Headers': true,
+        'method.response.header.Access-Control-Allow-Methods': true,
+        'method.response.header.Access-Control-Allow-Credentials': true,
+      },
+    },
+  ],
+});
+
 // Add outputs to the configuration file
 backend.addOutput({
   custom: {
