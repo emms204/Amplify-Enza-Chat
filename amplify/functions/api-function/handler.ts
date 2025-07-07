@@ -1,12 +1,9 @@
-import { Amplify } from "aws-amplify";
-import outputs from "../../../amplify_outputs.json";
 import { BedrockAgentRuntimeClient, RetrieveCommand } from "@aws-sdk/client-bedrock-agent-runtime";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
-import { generateClient } from "aws-amplify/data";
-import { type Schema } from "../../data/resource";
-
-Amplify.configure(outputs, { ssr: true });
+import { DatabaseService } from './database';
+import { getUserId, requireAuth } from './auth';
+import { generateConversationName } from './naming';
 
 interface ChatRequest {
   query: string;
@@ -51,54 +48,88 @@ const createResponse = (statusCode: number, body: any, event: APIGatewayProxyEve
   };
 };
 
+// Just-In-Time user creation
+const ensureUserExists = async (db: DatabaseService, userId: string, authContext: any): Promise<void> => {
+  try {
+    const existingUser = await db.getUser(userId);
+    if (!existingUser) {
+      console.log(`Creating new user: ${userId}`);
+      await db.createUser({
+        userId,
+        email: authContext.email,
+        displayName: authContext.username || authContext.email?.split('@')[0] || 'User',
+      });
+      console.log(`User created successfully: ${userId}`);
+    }
+  } catch (error) {
+    // If user creation fails due to race condition, that's okay
+    console.log(`User creation note for ${userId}:`, error);
+  }
+};
+
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
+  console.log('Handler started, event:', JSON.stringify(event, null, 2));
+
   // Handle preflight OPTIONS request
   if (event.httpMethod === 'OPTIONS') {
     return createResponse(200, '', event);
   }
 
-  const client = generateClient<Schema>();
-
-  // Parse the incoming request
-  let query = "";
-  let conversationId: string | undefined;
-
-  if (event.body) {
-    try {
-      const body: ChatRequest = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
-      query = body.query || "";
-      conversationId = body.conversationId;
-    } catch (e) {
-      console.error("Error parsing request body:", e);
-      return createResponse(400, { error: "Invalid request body" }, event);
-    }
-  }
-  
-  if (!query) {
-    return createResponse(400, { error: "Query parameter is required" }, event);
-  }
-
   try {
-    // 1. Manage the conversation
-    if (!conversationId) {
-      const { data: newConversation } = await client.models.Conversation.create({
-        name: query.substring(0, 50), // Use first 50 chars of query as name
-      });
-      if (newConversation) {
-        conversationId = newConversation.id;
-        console.log(`Created new conversation with ID: ${conversationId}`);
-      } else {
-        throw new Error("Could not create a new conversation.");
+    // Authenticate user and extract context
+    const authContext = requireAuth(event);
+    const userId = authContext.userId;
+    
+    console.log(`Authenticated user: ${userId}`);
+
+    // Initialize database service
+    const db = new DatabaseService();
+
+    // Ensure user exists (JIT pattern)
+    await ensureUserExists(db, userId, authContext);
+
+    // Parse the incoming request
+    let query = "";
+    let conversationId: string | undefined;
+    
+    if (event.body) {
+      try {
+        const body: ChatRequest = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
+        query = body.query || "";
+        conversationId = body.conversationId;
+      } catch (e) {
+        console.error("Error parsing request body:", e);
+        return createResponse(400, { error: "Invalid request body" }, event);
       }
+    }
+    
+    if (!query) {
+      return createResponse(400, { error: "Query parameter is required" }, event);
+    }
+
+    // 1. Manage the conversation
+    let conversation;
+    if (!conversationId) {
+      // Create new conversation with auto-generated name
+      const conversationName = generateConversationName(query);
+      conversation = await db.createConversation(userId, conversationName);
+      conversationId = conversation.conversationId;
+      console.log(`Created new conversation: ${conversationId} with name: "${conversationName}"`);
     } else {
-      console.log(`Continuing conversation with ID: ${conversationId}`);
+      // Verify user owns the conversation
+      conversation = await db.getConversation(conversationId, userId);
+      if (!conversation) {
+        return createResponse(403, { error: "Conversation not found or access denied" }, event);
+      }
+      console.log(`Continuing conversation: ${conversationId}`);
     }
 
     // 2. Save the user's message
-    await client.models.Message.create({
+    await db.createMessage({
+      conversationId,
+      userId,
       content: query,
       role: 'user',
-      conversationId: conversationId,
     });
     console.log("Saved user message.");
     
@@ -159,9 +190,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
           {
             role: "user",
             content: `You are an AI assistant that answers questions based on the provided knowledge base information.
-
 Based on the following information, please answer this question: ${query}
-
 Knowledge base information:
 ${retrievedPassages}`
           }
@@ -185,11 +214,12 @@ ${retrievedPassages}`
     })) || [];
 
     // 3. Save the assistant's message
-    await client.models.Message.create({
+    await db.createMessage({
+      conversationId,
+      userId,
       content: assistantResponse,
       role: 'assistant',
-      conversationId: conversationId,
-      sources: JSON.stringify(sources), // Store sources as a JSON string
+      sources: sources, // Store sources as structured data
     });
     console.log("Saved assistant message.");
     
@@ -198,6 +228,7 @@ ${retrievedPassages}`
       sources: sources,
       conversationId: conversationId, // Return conversationId to the client
     }, event);
+
   } catch (error: any) {
     console.error("Detailed error information:");
     console.error("Error name:", error.name);

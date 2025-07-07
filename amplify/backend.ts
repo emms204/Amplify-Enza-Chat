@@ -24,7 +24,30 @@ const backend = defineBackend({
   bedrockKbFunction
 });
 
-// Grant the function access to the new data resources
+// Add DynamoDB permissions to the function
+backend.bedrockKbFunction.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    effect: Effect.ALLOW,
+    actions: [
+      'dynamodb:PutItem',
+      'dynamodb:GetItem',
+      'dynamodb:Query',
+      'dynamodb:UpdateItem',
+      'dynamodb:DeleteItem',
+      'dynamodb:BatchWriteItem',
+    ],
+    resources: [
+      `${backend.data.resources.tables["User"].tableArn}`,
+      `${backend.data.resources.tables["User"].tableArn}/index/*`,
+      `${backend.data.resources.tables["Conversation"].tableArn}`,
+      `${backend.data.resources.tables["Conversation"].tableArn}/index/*`,
+      `${backend.data.resources.tables["Message"].tableArn}`,
+      `${backend.data.resources.tables["Message"].tableArn}/index/*`,
+    ],
+  })
+);
+
+// Grant the function access to AppSync for frontend compatibility
 backend.bedrockKbFunction.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     effect: Effect.ALLOW,
@@ -46,6 +69,13 @@ backend.bedrockKbFunction.resources.lambda.addToRolePolicy(
     resources: ['*']
   })
 );
+
+// Pass table names and Cognito info to Lambda function
+backend.bedrockKbFunction.addEnvironment("USER_TABLE_NAME", backend.data.resources.tables["User"].tableName);
+backend.bedrockKbFunction.addEnvironment("CONVERSATION_TABLE_NAME", backend.data.resources.tables["Conversation"].tableName);
+backend.bedrockKbFunction.addEnvironment("MESSAGE_TABLE_NAME", backend.data.resources.tables["Message"].tableName);
+backend.bedrockKbFunction.addEnvironment("USER_POOL_ID", backend.auth.resources.userPool.userPoolId);
+backend.bedrockKbFunction.addEnvironment("USER_POOL_CLIENT_ID", backend.auth.resources.userPoolClient.userPoolClientId);
 
 // Create a new API stack for the REST API
 const apiStack = backend.createStack("chat-api-stack");

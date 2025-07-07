@@ -7,21 +7,41 @@ specifies that any unauthenticated user can "create", "read", "update",
 and "delete" any "Todo" records.
 =========================================================================*/
 const schema = a.schema({
+  User: a.model({
+    userId: a.id().required(),
+    email: a.string(),
+    displayName: a.string(),
+    conversationCount: a.integer().default(0),
+    createdAt: a.datetime(),
+    updatedAt: a.datetime(),
+  }).authorization(allow => [
+    allow.owner()
+  ]).identifier(['userId']),
+
   Conversation: a.model({
-    name: a.string(),
+    conversationId: a.id().required(),
+    userId: a.id().required(),
+    name: a.string().required(),
+    messageCount: a.integer().default(0),
+    createdAt: a.datetime(),
+    updatedAt: a.datetime(),
     messages: a.hasMany('Message', 'conversationId'),
   }).authorization(allow => [
     allow.owner()
-  ]),
+  ]).identifier(['conversationId']),
+
   Message: a.model({
+    messageId: a.id().required(),
+    conversationId: a.id().required(),
+    userId: a.id().required(),
     content: a.string().required(),
     role: a.enum(['user', 'assistant']),
-    conversationId: a.id(),
-    conversation: a.belongsTo('Conversation', 'conversationId'),
     sources: a.json(),
+    createdAt: a.datetime(),
+    conversation: a.belongsTo('Conversation', 'conversationId'),
   }).authorization(allow => [
     allow.owner()
-  ]),
+  ]).identifier(['messageId']),
 });
 
 export type Schema = ClientSchema<typeof schema>;

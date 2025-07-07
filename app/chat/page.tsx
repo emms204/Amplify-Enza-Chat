@@ -32,7 +32,11 @@ function ChatPage() {
       fetchConversations();
       const subscription = client.models.Conversation.observeQuery().subscribe({
         next: ({ items }) => {
-          const sortedConversations = [...items].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          const sortedConversations = [...items].sort((a, b) => {
+            const aDate = new Date(a.updatedAt || a.createdAt || 0).getTime();
+            const bDate = new Date(b.updatedAt || b.createdAt || 0).getTime();
+            return bDate - aDate;
+          });
           setConversations(sortedConversations);
         }
       });
@@ -42,7 +46,11 @@ function ChatPage() {
 
   const fetchConversations = async () => {
     const { data: items } = await client.models.Conversation.list();
-    const sortedConversations = [...items].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const sortedConversations = [...items].sort((a, b) => {
+      const aDate = new Date(a.updatedAt || a.createdAt || 0).getTime();
+      const bDate = new Date(b.updatedAt || b.createdAt || 0).getTime();
+      return bDate - aDate;
+    });
     setConversations(sortedConversations);
   };
 
@@ -50,12 +58,17 @@ function ChatPage() {
     const { data } = await client.models.Message.list({
       filter: { conversationId: { eq: conversationId } }
     });
-    const sortedMessages = data.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    const sortedMessages = data.sort((a, b) => {
+      const aDate = new Date(a.createdAt || 0).getTime();
+      const bDate = new Date(b.createdAt || 0).getTime();
+      return aDate - bDate;
+    });
     const newMessages: Message[] = sortedMessages.map(msg => ({
-      id: msg.id,
+      id: msg.messageId || '',
       type: msg.role === 'user' ? 'user' : 'assistant',
       content: msg.content,
-      timestamp: new Date(msg.createdAt)
+      timestamp: new Date(msg.createdAt || 0),
+      sources: msg.sources ? (typeof msg.sources === 'string' ? JSON.parse(msg.sources) : msg.sources) : undefined
     }));
     setMessages(newMessages);
   };
@@ -77,6 +90,30 @@ function ChatPage() {
         timestamp: new Date(),
       },
     ]);
+  };
+
+  const handleDeleteConversation = async (conversationId: string) => {
+    try {
+      setIsLoading(true);
+      
+      // Delete the conversation using the Amplify client with correct field name
+      await client.models.Conversation.delete({ conversationId: conversationId });
+      
+      // If the deleted conversation was active, switch to new chat
+      if (activeConversationId === conversationId) {
+        handleNewChat();
+      }
+      
+      // Refresh conversations list
+      await fetchConversations();
+      
+      console.log(`Conversation ${conversationId} deleted successfully`);
+    } catch (error) {
+      console.error('Error deleting conversation:', error);
+      // You might want to show a toast notification here
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleSubmit = async (input: string) => {
@@ -106,6 +143,9 @@ function ChatPage() {
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, assistantMessage]);
+      
+      // Refresh conversations to show updated names and ordering
+      await fetchConversations();
     } catch (error) {
       console.error('Chat error:', error);
       const errorMessage: Message = {
@@ -138,6 +178,7 @@ function ChatPage() {
             activeConversationId={activeConversationId}
             onSelectConversation={handleSelectConversation}
             onNewChat={handleNewChat}
+            onDeleteConversation={handleDeleteConversation}
           />
           <ChatInterface 
             messages={messages}
