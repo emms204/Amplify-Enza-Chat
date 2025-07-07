@@ -1,8 +1,12 @@
+import { Amplify } from "aws-amplify";
+import outputs from "../../../amplify_outputs.json";
 import { BedrockAgentRuntimeClient, RetrieveCommand } from "@aws-sdk/client-bedrock-agent-runtime";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { generateClient } from "aws-amplify/data";
 import { type Schema } from "../../data/resource";
+
+Amplify.configure(outputs, { ssr: true });
 
 interface ChatRequest {
   query: string;
