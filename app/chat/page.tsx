@@ -43,7 +43,19 @@ function ChatPage() {
             const bDate = new Date(b.updatedAt || b.createdAt || 0).getTime();
             return bDate - aDate;
           });
-          setConversations(sortedConversations);
+          
+          // Map the data to match sidebar expectations (id instead of conversationId)
+          const mappedConversations = sortedConversations.map(conv => ({
+            id: conv.conversationId, // Map conversationId to id for sidebar
+            conversationId: conv.conversationId, // Keep original field for other operations
+            name: conv.name,
+            createdAt: conv.createdAt,
+            updatedAt: conv.updatedAt,
+            userId: conv.userId,
+            messageCount: conv.messageCount
+          }));
+          
+          setConversations(mappedConversations);
           setIsLoadingConversations(false);
         },
         error: (error) => {
@@ -66,7 +78,19 @@ function ChatPage() {
         const bDate = new Date(b.updatedAt || b.createdAt || 0).getTime();
         return bDate - aDate;
       });
-      setConversations(sortedConversations);
+      
+      // Map the data to match sidebar expectations (id instead of conversationId)
+      const mappedConversations = sortedConversations.map(conv => ({
+        id: conv.conversationId, // Map conversationId to id for sidebar
+        conversationId: conv.conversationId, // Keep original field for other operations
+        name: conv.name,
+        createdAt: conv.createdAt,
+        updatedAt: conv.updatedAt,
+        userId: conv.userId,
+        messageCount: conv.messageCount
+      }));
+      
+      setConversations(mappedConversations);
     } catch (error) {
       console.error('Error fetching conversations:', error);
       setError('Failed to load conversations. Please try again.');

@@ -17,6 +17,7 @@ export interface Conversation {
   messageCount: number;
   createdAt: string;
   updatedAt: string;
+  owner?: string;
 }
 
 export interface Message {
@@ -27,6 +28,7 @@ export interface Message {
   role: 'user' | 'assistant';
   sources?: any;
   createdAt: string;
+  owner?: string;
 }
 
 export class DatabaseService {
@@ -36,14 +38,12 @@ export class DatabaseService {
   private messageTableName: string;
 
   constructor() {
-    const client = new DynamoDBClient({
-      region: process.env.AWS_REGION || 'us-east-1'
-    });
+    const client = new DynamoDBClient({ region: process.env.REGION || 'us-east-1' });
     this.docClient = DynamoDBDocumentClient.from(client);
     
-    this.userTableName = process.env.USER_TABLE_NAME!;
-    this.conversationTableName = process.env.CONVERSATION_TABLE_NAME!;
-    this.messageTableName = process.env.MESSAGE_TABLE_NAME!;
+    this.userTableName = process.env.USER_TABLE_NAME || '';
+    this.conversationTableName = process.env.CONVERSATION_TABLE_NAME || '';
+    this.messageTableName = process.env.MESSAGE_TABLE_NAME || '';
   }
 
   // User Operations
@@ -89,13 +89,16 @@ export class DatabaseService {
   // Conversation Operations
   async createConversation(userId: string, name: string): Promise<Conversation> {
     const now = new Date().toISOString();
+    const conversationId = `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
     const conversation: Conversation = {
-      conversationId: `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      conversationId,
       userId,
       name,
       messageCount: 0,
       createdAt: now,
       updatedAt: now,
+      owner: userId,
     };
 
     await this.docClient.send(new PutCommand({
@@ -110,17 +113,23 @@ export class DatabaseService {
   }
 
   async getUserConversations(userId: string): Promise<Conversation[]> {
-    const result = await this.docClient.send(new QueryCommand({
-      TableName: this.conversationTableName,
-      IndexName: 'UserConversationsIndex', // We'll need to create this GSI
-      KeyConditionExpression: 'userId = :userId',
-      ExpressionAttributeValues: {
-        ':userId': userId,
-      },
-      ScanIndexForward: false, // Most recent first
-    }));
+    try {
+      // First try to scan for conversations with owner field (AppSync format)
+      const result = await this.docClient.send(new QueryCommand({
+        TableName: this.conversationTableName,
+        IndexName: 'UserConversationsIndex',
+        KeyConditionExpression: 'userId = :userId',
+        ExpressionAttributeValues: {
+          ':userId': userId,
+        },
+        ScanIndexForward: false, // Most recent first
+      }));
 
-    return result.Items as Conversation[] || [];
+      return result.Items as Conversation[] || [];
+    } catch (error) {
+      console.error('Error fetching conversations:', error);
+      return [];
+    }
   }
 
   async getConversation(conversationId: string, userId: string): Promise<Conversation | null> {
@@ -132,7 +141,7 @@ export class DatabaseService {
     const conversation = result.Item as Conversation;
     
     // Verify ownership
-    if (conversation && conversation.userId !== userId) {
+    if (conversation && conversation.userId !== userId && conversation.owner !== userId) {
       return null; // User doesn't own this conversation
     }
 
@@ -210,10 +219,13 @@ export class DatabaseService {
   // Message Operations
   async createMessage(messageData: Omit<Message, 'messageId' | 'createdAt'>): Promise<Message> {
     const now = new Date().toISOString();
+    const messageId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
     const message: Message = {
       ...messageData,
-      messageId: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      messageId,
       createdAt: now,
+      owner: messageData.userId,
     };
 
     await this.docClient.send(new PutCommand({
@@ -222,11 +234,6 @@ export class DatabaseService {
     }));
 
     // Update conversation message count and updatedAt
-    await this.updateConversation(messageData.conversationId, messageData.userId, {
-      messageCount: undefined, // We'll increment this separately
-    });
-
-    // Increment message count
     await this.docClient.send(new UpdateCommand({
       TableName: this.conversationTableName,
       Key: { conversationId: messageData.conversationId },
