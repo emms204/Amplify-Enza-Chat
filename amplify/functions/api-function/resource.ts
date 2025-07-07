@@ -4,7 +4,8 @@ export const bedrockKbFunction = defineFunction({
   name: "bedrock-kb-api",
   environment: {
     // Bedrock configuration
-    KNOWLEDGE_BASE_ID: "WAWVDMQWLL", // Your actual Knowledge Base ID
+    KNOWLEDGE_BASE_ID: "FRTBEFECWV",
+    // "WAWVDMQWLL", // Your actual Knowledge Base ID
     REGION: "us-east-1", // Adjust to your region
     
     // DynamoDB table names (will be set in backend.ts)
