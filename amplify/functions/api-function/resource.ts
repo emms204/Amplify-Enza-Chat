@@ -4,7 +4,7 @@ export const bedrockKbFunction = defineFunction({
   name: "bedrock-kb-api",
   environment: {
     // Environment variables your function needs
-    KNOWLEDGE_BASE_ID: "FRTBEFECWV", // Your actual Knowledge Base ID
+    KNOWLEDGE_BASE_ID: "WAWVDMQWLL", // Your actual Knowledge Base ID
     REGION: "us-east-1", // Adjust to your region
     AMPLIFY_BACKEND_ID: "" // This will be set in backend.ts
   },

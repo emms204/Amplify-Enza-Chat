@@ -19,7 +19,7 @@ interface ClaudeResponse {
 const ALLOWED_ORIGINS = [
   'http://localhost:3000',
   'https://localhost:3000',
-  // 'https://main.d2u0pycjfm8zuu.amplifyapp.com',
+  'https://main.d2u0pycjfm8zuu.amplifyapp.com',
   'https://main.d1w9nr6stbxah6.amplifyapp.com'
 ];
 

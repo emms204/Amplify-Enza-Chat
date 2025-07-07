@@ -61,7 +61,7 @@ const chatRestApi = new RestApi(apiStack, "ChatRestApi", {
     allowOrigins: [
       'http://localhost:3000',
       'https://localhost:3000',
-      // 'https://main.d2u0pycjfm8zuu.amplifyapp.com',
+      'https://main.d2u0pycjfm8zuu.amplifyapp.com',
       'https://main.d1w9nr6stbxah6.amplifyapp.com'
     ],
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
