@@ -4,9 +4,6 @@ import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { generateClient } from "aws-amplify/data";
 import { type Schema } from "../../data/resource";
 
-// This is the client used to interact with the backend
-const client = generateClient<Schema>();
-
 interface ChatRequest {
   query: string;
   conversationId?: string;
@@ -20,8 +17,8 @@ interface ClaudeResponse {
 
 // Allowed origins for CORS
 const ALLOWED_ORIGINS = [
-  // 'http://localhost:3000',
-  // 'https://localhost:3000',
+  'http://localhost:3000',
+  'https://localhost:3000',
   // 'https://main.d2u0pycjfm8zuu.amplifyapp.com',
   'https://main.d1w9nr6stbxah6.amplifyapp.com'
 ];
@@ -54,6 +51,8 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
   if (event.httpMethod === 'OPTIONS') {
     return createResponse(200, '', event);
   }
+
+  const client = generateClient<Schema>();
 
   // Parse the incoming request
   let query = "";

@@ -8,6 +8,7 @@ import { ChatInterface, Message } from "@/components/chat-interface"
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '@/amplify/data/resource';
 import queryKnowledgeBase from '@/services/chat_service';
+import { useAuthenticator } from '@aws-amplify/ui-react';
 
 const client = generateClient<Schema>();
 
@@ -24,17 +25,20 @@ function ChatPage() {
   const [conversations, setConversations] = useState<any[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const { authStatus } = useAuthenticator(context => [context.authStatus]);
 
   useEffect(() => {
-    fetchConversations();
-    const subscription = client.models.Conversation.observeQuery().subscribe({
-      next: ({ items }) => {
-        const sortedConversations = [...items].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        setConversations(sortedConversations);
-      }
-    });
-    return () => subscription.unsubscribe();
-  }, []);
+    if (authStatus === 'authenticated') {
+      fetchConversations();
+      const subscription = client.models.Conversation.observeQuery().subscribe({
+        next: ({ items }) => {
+          const sortedConversations = [...items].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          setConversations(sortedConversations);
+        }
+      });
+      return () => subscription.unsubscribe();
+    }
+  }, [authStatus]);
 
   const fetchConversations = async () => {
     const { data: items } = await client.models.Conversation.list();
