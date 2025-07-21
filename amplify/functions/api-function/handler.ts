@@ -20,7 +20,7 @@ interface ClaudeResponse {
 // Allowed origins for CORS
 const ALLOWED_ORIGINS = [
   'http://localhost:3000',
-  'https://localhost:3000',
+  'https://main.dptc9tdidmx35.amplifyapp.com',
   'https://main.d2u0pycjfm8zuu.amplifyapp.com',
   'https://main.d1w9nr6stbxah6.amplifyapp.com',
   'https://main.d1oxkyfguywzru.amplifyapp.com'
@@ -337,7 +337,7 @@ async function handleChatRequest(
   
   // Initialize the Bedrock Agent Runtime client with timeout configuration
   const agentClient = new BedrockAgentRuntimeClient({ 
-    region: process.env.REGION || "us-east-1",
+    region: process.env.REGION || "eu-west-1",
     requestHandler: {
       requestTimeout: 25000, // 25 seconds to allow for API Gateway timeout
     }
@@ -345,7 +345,7 @@ async function handleChatRequest(
   
   chatLogger.info('Bedrock configuration', {
     knowledgeBaseId: process.env.KNOWLEDGE_BASE_ID,
-    region: process.env.REGION || "us-east-1"
+    region: process.env.REGION || "eu-west-1"
   });
   
   // Retrieve information from the knowledge base
@@ -394,7 +394,7 @@ async function handleChatRequest(
   
   // Use Bedrock Runtime to generate a response using the retrieved information
   const runtimeClient = new BedrockRuntimeClient({ 
-    region: process.env.REGION || "us-east-1",
+    region: process.env.REGION || "eu-west-1",
     requestHandler: {
       requestTimeout: 20000, // 20 seconds for model generation
     }
