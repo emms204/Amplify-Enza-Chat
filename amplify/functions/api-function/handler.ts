@@ -20,10 +20,7 @@ interface ClaudeResponse {
 // Allowed origins for CORS
 const ALLOWED_ORIGINS = [
   'http://localhost:3000',
-  'https://main.dptc9tdidmx35.amplifyapp.com',
-  'https://main.d2u0pycjfm8zuu.amplifyapp.com',
-  'https://main.d1w9nr6stbxah6.amplifyapp.com',
-  'https://main.d1oxkyfguywzru.amplifyapp.com'
+  'https://main.d2v40bpj9oxupa.amplifyapp.com',
 ];
 
 // Function to get appropriate CORS headers based on request origin
