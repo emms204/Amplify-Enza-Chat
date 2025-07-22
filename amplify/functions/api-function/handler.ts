@@ -1,4 +1,4 @@
-import { BedrockAgentRuntimeClient, RetrieveCommand } from "@aws-sdk/client-bedrock-agent-runtime";
+import { BedrockAgentRuntimeClient, RetrieveCommand, RetrieveCommandInput } from "@aws-sdk/client-bedrock-agent-runtime";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { DatabaseService } from './database';
@@ -92,6 +92,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     return createResponse(200, '', event);
   }
 
+  // Main request processing: handle authentication, database operations, and routing
   try {
     // Authenticate user and extract context
     const authContext = requireAuth(event);
@@ -130,6 +131,8 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     return createResponse(404, { error: "Endpoint not found" }, event);
 
   } catch (error: any) {
+    // Global error handler: captures all unhandled errors from authentication, database operations,
+    // and business logic, then returns appropriate HTTP status codes and error messages to the client
     const duration = Date.now() - startTime;
     
     logger.error("Request failed with error", error, {
@@ -346,19 +349,40 @@ async function handleChatRequest(
   });
   
   // Retrieve information from the knowledge base
-  const retrieveParams = {
+  const retrieveParams: RetrieveCommandInput = {
     knowledgeBaseId: process.env.KNOWLEDGE_BASE_ID,
     retrievalQuery: {
       text: query
     },
     retrievalConfiguration: {
       vectorSearchConfiguration: {
-        numberOfResults: 5
+        numberOfResults: 20, // 1. Retrieve more results initially to give the reranker a good selection.
+        
+        // 2. Add the reranking step directly inside the retrieval configuration.
+        rerankingConfiguration: {
+          type: "BEDROCK_RERANKING_MODEL", // This now correctly matches the required literal type.
+          bedrockRerankingConfiguration: {
+            modelConfiguration: {
+              // Corrected model ARN for cross-region inference from eu-west-1 to eu-central-1.
+              // This points to the Cohere Rerank 3.5 model in its home region.
+              modelArn: "arn:aws:bedrock:eu-central-1::foundation-model/cohere.rerank-v3-5:0"
+            },
+            numberOfRerankedResults: 5 // 3. The final number of top-ranked results you want.
+          }
+        }
+        
+        // Example of metadata filtering. You can uncomment and adapt this if you add metadata to your documents.
+        // filter: {
+        //   equals: {
+        //     key: "department",
+        //     value: "finance"
+        //   }
+        // },
       }
     }
   };
   
-  chatLogger.debug('Starting knowledge base retrieval', { 
+  chatLogger.debug('Starting knowledge base retrieval', {
     numberOfResults: 5,
     queryLength: query.length 
   });
@@ -398,7 +422,7 @@ async function handleChatRequest(
   });
   
   const generateParams = {
-    modelId: "anthropic.claude-3-sonnet-20240229-v1:0",
+    modelId: "anthropic.claude-3-haiku-20240307-v1:0", // Switched to Haiku for faster inference
     contentType: "application/json",
     accept: "application/json",
     body: JSON.stringify({
@@ -417,7 +441,7 @@ ${retrievedPassages}`
   };
   
   chatLogger.debug('Starting model generation', {
-    modelId: "anthropic.claude-3-sonnet-20240229-v1:0",
+    modelId: "anthropic.claude-3-haiku-20240307-v1:0", // Switched to Haiku for faster inference
     maxTokens: 1000
   });
   
