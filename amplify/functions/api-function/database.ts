@@ -41,7 +41,12 @@ export class DatabaseService {
 
   constructor(logger?: Logger) {
     const client = new DynamoDBClient({ region: process.env.REGION || 'us-east-1' });
-    this.docClient = DynamoDBDocumentClient.from(client);
+    this.docClient = DynamoDBDocumentClient.from(client, {
+      marshallOptions: {
+        removeUndefinedValues: true, // Automatically remove undefined values
+        convertEmptyValues: false
+      }
+    });
     
     this.userTableName = process.env.USER_TABLE_NAME || '';
     this.conversationTableName = process.env.CONVERSATION_TABLE_NAME || '';

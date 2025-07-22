@@ -504,13 +504,25 @@ async function handleChatRequest(
   });
   
   const assistantResponse = result.content[0].text;
-  const sources = finalResults.map((result: any) => ({
-    content: result.content?.text || 'No content available',
-    metadata: result.metadata || {},
-    location: result.location,
-    score: result.score,
-    relevance_score: result.relevance_score // This is the new Cohere score, if available
-  })) || [];
+  const sources = finalResults.map((result: any) => {
+    const source: any = {
+      content: result.content?.text || 'No content available',
+      metadata: result.metadata || {},
+    };
+    
+    // Only add properties that are not undefined
+    if (result.location !== undefined) {
+      source.location = result.location;
+    }
+    if (result.score !== undefined) {
+      source.score = result.score;
+    }
+    if (result.relevance_score !== undefined) {
+      source.relevance_score = result.relevance_score;
+    }
+    
+    return source;
+  }) || [];
 
   // 3. Save the assistant's message
   const saveAssistantStart = Date.now();
