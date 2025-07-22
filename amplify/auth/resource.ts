@@ -1,4 +1,5 @@
 import { defineAuth } from '@aws-amplify/backend';
+import { preSignup } from '../functions/pre-signup/resource';
 
 /**
  * Define and configure your auth resource
@@ -7,5 +8,8 @@ import { defineAuth } from '@aws-amplify/backend';
 export const auth = defineAuth({
   loginWith: {
     email: true,
+  },
+  triggers: {
+    preSignUp: preSignup,
   },
 });

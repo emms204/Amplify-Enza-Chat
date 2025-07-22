@@ -190,8 +190,7 @@ export function ChatSidebar({
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
               <div className="text-xl font-bold text-gray-900 dark:text-white">
-                enza
-                <span className="text-emerald-400 ml-1">✚</span>
+                Enza
               </div>
             </div>
             <Button

@@ -16,6 +16,9 @@ export const bedrockKbFunction = defineFunction({
     // Cognito configuration (will be set in backend.ts)
     USER_POOL_ID: "",
     USER_POOL_CLIENT_ID: "",
+
+    // Cohere configuration
+    COHERE_API_KEY: "y6527Mi4ahq7DDGgRMVpbSLl8ucCHsrQe3HQBRBn",
   },
   // Configure function with proper timeout and memory for DynamoDB operations
   timeoutSeconds: 60, // 60 seconds timeout for Bedrock calls

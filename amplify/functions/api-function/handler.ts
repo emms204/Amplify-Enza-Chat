@@ -5,6 +5,7 @@ import { DatabaseService } from './database';
 import { getUserId, requireAuth } from './auth';
 import { generateConversationName, validateConversationName } from './naming';
 import { Logger } from './logger';
+import { CohereClient } from 'cohere-ai';
 
 interface ChatRequest {
   query: string;
@@ -15,6 +16,15 @@ interface ClaudeResponse {
   content: Array<{
     text: string;
   }>;
+}
+
+interface CohereRerankResponse {
+  results: Array<{
+    index: number;
+    relevance_score: number;
+  }>;
+  id: string;
+  meta: Array<{}>;
 }
 
 // Allowed origins for CORS
@@ -356,20 +366,7 @@ async function handleChatRequest(
     },
     retrievalConfiguration: {
       vectorSearchConfiguration: {
-        numberOfResults: 20, // 1. Retrieve more results initially to give the reranker a good selection.
-        
-        // 2. Add the reranking step directly inside the retrieval configuration.
-        rerankingConfiguration: {
-          type: "BEDROCK_RERANKING_MODEL", // This now correctly matches the required literal type.
-          bedrockRerankingConfiguration: {
-            modelConfiguration: {
-              // Corrected model ARN for cross-region inference from eu-west-1 to eu-central-1.
-              // This points to the Cohere Rerank 3.5 model in its home region.
-              modelArn: "arn:aws:bedrock:eu-central-1::foundation-model/cohere.rerank-v3-5:0"
-            },
-            numberOfRerankedResults: 5 // 3. The final number of top-ranked results you want.
-          }
-        }
+        numberOfResults: 20 // Retrieve more documents to rerank manually.
         
         // Example of metadata filtering. You can uncomment and adapt this if you add metadata to your documents.
         // filter: {
@@ -383,7 +380,7 @@ async function handleChatRequest(
   };
   
   chatLogger.debug('Starting knowledge base retrieval', {
-    numberOfResults: 5,
+    numberOfResults: 20,
     queryLength: query.length 
   });
   
@@ -392,7 +389,7 @@ async function handleChatRequest(
   const retrieveResponse = await agentClient.send(retrieveCommand);
   const retrieveDuration = Date.now() - retrieveStart;
   
-  const resultCount = retrieveResponse.retrievalResults?.length || 0;
+  let resultCount = retrieveResponse.retrievalResults?.length || 0;
   chatLogger.performance('bedrockRetrieval', retrieveDuration, {
     resultCount,
     success: true
@@ -402,9 +399,54 @@ async function handleChatRequest(
     resultCount,
     durationMs: retrieveDuration
   });
+
+  let finalResults = retrieveResponse.retrievalResults || [];
   
-  // Extract retrieved passages
-  const retrievedPassages = retrieveResponse.retrievalResults?.map((result: any) => 
+  if (process.env.COHERE_API_KEY && finalResults.length > 0) {
+    const cohere = new CohereClient({
+      token: process.env.COHERE_API_KEY,
+    });
+    const documentsToRerank = finalResults.map(r => r.content?.text || '');
+    chatLogger.info(`Attempting to rerank ${documentsToRerank.length} documents with Cohere.`);
+    const rerankStart = Date.now();
+  
+    try {
+      const rerankData = await cohere.rerank({
+        query: query,
+        documents: documentsToRerank,
+        topN: 5,
+        model: 'rerank-v3.5',
+      });
+      const rerankDuration = Date.now() - rerankStart;
+  
+      const rerankedBedrockResults = rerankData.results.map(cohereResult => {
+        const originalResult = finalResults[cohereResult.index];
+        return {
+          ...originalResult,
+          relevanceScore: cohereResult.relevanceScore, // Add Cohere's score
+        };
+      });
+  
+      finalResults = rerankedBedrockResults;
+      resultCount = finalResults.length;
+  
+      chatLogger.performance('cohereRerank', rerankDuration, {
+        success: true,
+        documentCount: documentsToRerank.length,
+        rerankedCount: resultCount,
+      });
+      chatLogger.info('Successfully reranked documents with Cohere.', { finalCount: resultCount });
+  
+    } catch (error) {
+      chatLogger.error('Cohere Rerank API call failed. Proceeding with original document order.', error as Error);
+    }
+  } else if (!process.env.COHERE_API_KEY) {
+    chatLogger.warn('COHERE_API_KEY environment variable not set. Skipping reranking step.');
+  }
+  // --- End of Manual Reranking ---
+  
+  // Extract retrieved passages from the (potentially reranked) final results
+  const retrievedPassages = finalResults.map((result: any) => 
     result.content?.text
   ).join("\n\n") || "";
   
@@ -432,13 +474,13 @@ async function handleChatRequest(
         {
           role: "user",
           content: `You are an AI assistant that answers questions based on the provided knowledge base information.
-Based on the following information, please answer this question: ${query}
-Knowledge base information:
-${retrievedPassages}`
-        }
-      ]
-    })
-  };
+          Based on the following information, please answer this question: ${query}
+          Knowledge base information:
+          ${retrievedPassages}`
+                  }
+                ]
+              })
+            };
   
   chatLogger.debug('Starting model generation', {
     modelId: "anthropic.claude-3-haiku-20240307-v1:0", // Switched to Haiku for faster inference
@@ -462,11 +504,12 @@ ${retrievedPassages}`
   });
   
   const assistantResponse = result.content[0].text;
-  const sources = retrieveResponse.retrievalResults?.map((result: any) => ({
+  const sources = finalResults.map((result: any) => ({
     content: result.content?.text || 'No content available',
     metadata: result.metadata || {},
     location: result.location,
-    score: result.score
+    score: result.score,
+    relevance_score: result.relevance_score // This is the new Cohere score, if available
   })) || [];
 
   // 3. Save the assistant's message
