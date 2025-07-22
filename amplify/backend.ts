@@ -13,7 +13,6 @@ import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { auth } from './auth/resource';
 import { data } from './data/resource';
 import { bedrockKbFunction } from "./functions/api-function/resource";
-import { preSignup } from './functions/pre-signup/resource';
 import * as cdk from 'aws-cdk-lib';
 
 /**
@@ -22,8 +21,7 @@ import * as cdk from 'aws-cdk-lib';
 const backend = defineBackend({
   auth,
   data,
-  bedrockKbFunction,
-  preSignup
+  bedrockKbFunction
 });
 
 // Add DynamoDB permissions to the function
